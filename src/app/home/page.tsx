@@ -22,10 +22,9 @@ function isoOrUndefined(s?: string) {
 export default function Page() {
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [input, setInput] = React.useState('');
-  const [chat, setChat] = React.useState<{ role: 'user' | 'assistant'; text: string }[]>([]);
+  const [chat, setChat] = React.useState<{ role: 'user' | 'model'; text: string }[]>([]);
   const [editing, setEditing] = React.useState<{ id: string; field: keyof Task } | null>(null);
   const [loading, setLoading] = React.useState(false);
-  const trackerRef = React.useRef<any>({});
   function addTaskLocal(args: any) {
     const id = crypto.randomUUID();
     const name = args.name?.toString().trim();
@@ -107,16 +106,15 @@ export default function Page() {
 
     setChat(prev => [
       ...prev,
-      { role: 'assistant', text: `Found ${filtered.length} task(s).` },
+      { role: 'model', text: `Found ${filtered.length} task(s).` },
     ]);
   }
 
   async function sendToGemini(msg: string) {
     setLoading(true);
-    console.log("Sending message to Gemini: ", trackerRef.current);
     const res = await fetch('/api/chat', {
       method: 'POST',
-      body: JSON.stringify({ message: msg, contextTasks: tasks, tracker: trackerRef.current }),
+      body: JSON.stringify({ chatHistory: chat, message: msg}),
       headers: { 'Content-Type': 'application/json' },
     });
 
@@ -137,9 +135,7 @@ export default function Page() {
 
         if (payload.type === 'text') {
           console.log("Received text payload: ", payload.text);
-          const res = JSON.parse(payload.text)
-          trackerRef.current = res.tracker;
-          setChat(prev => [...prev, { role: 'assistant', text: res.reply }]);
+          setChat(prev => [...prev, { role: 'model', text: payload.text }]);
         } else if (payload.type === 'toolCall') {
           // Dispatch tool call locally (MCP-like behavior)
           if (payload.name === 'add_task') addTaskLocal(payload.args);

@@ -3,6 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 export const runtime = 'nodejs';
 import { structured_output_config } from './configs/structured_output';
 import { track } from 'framer-motion/client';
+import { tools } from './configs/tools';
 
 type StreamEvent =
   | { type: 'text'; text: string }
@@ -10,7 +11,7 @@ type StreamEvent =
   | { type: 'done' };
 
 export async function POST(req: NextRequest) {
-  const { message, contextTasks, tracker } = await req.json();
+  const { message, chatHistory } = await req.json();
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -20,43 +21,45 @@ export async function POST(req: NextRequest) {
 
         // Provide current tasks as context so Gemini can reference them for edit/remove/find.
         const system = `
-You are an intelligent assistant for an AI Task Manager.
+You are an AI Task Manager Assistant.
+Your job is to help manage tasks through natural conversation and function calls.
 
-Your goal is to understand user requests about tasks and produce structured JSON output following the given schema. 
-Each response must include:
-- 'reply': a concise message to the user.
-- 'function_call': when ready to execute a task-related action.
-- 'tracker': a compact object maintaining conversational state.
+Instructions:
 
-Guidelines:
-1. Always fill mandatory fields ('name' + 'datetime' or 'date_range') before producing a 'function_call' with 'add_task'.
-2. Use the 'tracker' object to record missing fields, inferred operation, and progress across turns.
-3. If required data is missing, **ask a concise follow-up question** and update the 'tracker' accordingly.
-4. Once all required fields are collected, **return a valid 'function_call' object** (e.g., 'add_task', 'edit_task', 'remove_task', 'find_tasks') with all arguments filled.
-5. When a 'function_call' is returned, **set the 'tracker' object to an empty object '{}'**, indicating the task is complete.
-6. Use ISO 8601 format for all date and time values (e.g., '2025-10-21T19:00:00Z').
-7. Only return **one function_call per turn**, unless explicitly asked to batch multiple operations.
-8. If editing, removing, or finding tasks, use the provided 'contextTasks' to identify correct targets.
+Use the chat history to infer as much information as possible about the user's intent.
 
-Be precise, structured, and consistent with the schema.
+If any required information is missing (for example, task name, datetime, date range, etc.), ask concise, context-aware follow-up questions until all required details are gathered.
+
+Once all mandatory fields are collected from the conversation, make the function call (add_task, edit_task, remove_task, or find_tasks).
+
+For edit or delete (remove) operations, always ask for confirmation if it hasn't been explicitly given yet.
+
+Avoid repeating already-known information from the chat history.
+
+Keep your replies short, natural, and consistent with the tone of a helpful productivity assistant.
+
+Goal:
+Ensure that before every function call, all necessary parameters are known and confirmed.
         `.trim();
-        var temp = JSON.stringify({ system, contextTasks, user: message, tracker }, null, 2);
+        var temp = JSON.stringify({ system, user: message }, null, 2);
         const contents = [
           { role: 'user', parts: [{ text: temp }] },
         ];
-        // Call Gemini with tools; function calling returns functionCalls.
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents,
+        
+        const chat = ai.chats.create({
+          model: "gemini-2.5-flash",
+          history: chatHistory,
           config: {
-            responseSchema: structured_output_config.responseSchema, 
-            responseMimeType: structured_output_config.responseMimeType,
+            tools: tools, 
+            systemInstruction: system,
           },
         });
 
+        // Call Gemini with tools; function calling returns functionCalls.
+        const response = await chat.sendMessage({message})
+
         // Emit assistant text (if any)
         const text = response.text;
-        var res = JSON.parse(text);
         console.log("Generated response: ", text);
         if (text) {
           const event: StreamEvent = { type: 'text', text: text };
@@ -65,7 +68,7 @@ Be precise, structured, and consistent with the schema.
 
         // Emit function calls (tool calls)
         // SDK returns functionCalls on response; each has name + args
-        const calls = (res as any).function_call ?? {};
+        const calls = (response as any).function_call ?? {};
 
         console.log("Function calls: ", calls);
         if(calls) {
