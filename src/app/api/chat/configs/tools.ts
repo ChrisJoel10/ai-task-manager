@@ -1,3 +1,5 @@
+import { Type } from "@google/genai";
+
 export const tools = [
   {
     functionDeclarations: [
@@ -5,30 +7,30 @@ export const tools = [
         name: 'add_task',
         description: 'Add a new task using either a fixed datetime or a date range.',
         parameters: {
-          one_of: [
+          oneOf: [ // ✅ note: use `oneOf`, not `one_of`
             {
-              type: 'object',
+              type: Type.OBJECT,
               required: ['name', 'datetime'],
               properties: {
-                name: { type: 'string', description: 'Task name.' },
-                datetime: { type: 'string', description: 'ISO datetime, e.g., 2025-10-20T12:00:00Z.' },
-                desc: { type: 'string', description: 'Optional description.' }
+                name: { type: Type.STRING, description: 'Task name.' },
+                datetime: { type: Type.STRING, description: 'ISO datetime, e.g., 2025-10-20T12:00:00Z.' },
+                desc: { type: Type.STRING, description: 'Optional description.' }
               }
             },
             {
-              type: 'object',
+              type: Type.OBJECT,
               required: ['name', 'date_range'],
               properties: {
-                name: { type: 'string', description: 'Task name.' },
+                name: { type: Type.STRING, description: 'Task name.' },
                 date_range: {
-                  type: 'object',
+                  type: Type.OBJECT,
                   required: ['start', 'end'],
                   properties: {
-                    start: { type: 'string', description: 'ISO start datetime.' },
-                    end: { type: 'string', description: 'ISO end datetime.' }
+                    start: { type: Type.STRING, description: 'ISO start datetime.' },
+                    end: { type: Type.STRING, description: 'ISO end datetime.' }
                   }
                 },
-                desc: { type: 'string', description: 'Optional description.' }
+                desc: { type: Type.STRING, description: 'Optional description.' }
               }
             }
           ]
@@ -38,51 +40,51 @@ export const tools = [
         name: 'edit_task',
         description: 'Edit an existing task by id or exact name; include fields to change in patch.',
         parameters: {
-          one_of: [
+          oneOf: [
             {
-              type: 'object',
+              type: Type.OBJECT,
               required: ['id', 'patch'],
               properties: {
-                id: { type: 'string', description: 'Task ID.' },
+                id: { type: Type.STRING, description: 'Task ID.' },
                 patch: {
-                  type: 'object',
+                  type: Type.OBJECT,
                   properties: {
-                    name: { type: 'string' },
-                    datetime: { type: 'string', description: 'If set, clears date_range.' },
+                    name: { type: Type.STRING },
+                    datetime: { type: Type.STRING, description: 'If set, clears date_range.' },
                     date_range: {
-                      type: 'object',
+                      type: Type.OBJECT,
                       required: ['start', 'end'],
                       properties: {
-                        start: { type: 'string' },
-                        end: { type: 'string' }
+                        start: { type: Type.STRING },
+                        end: { type: Type.STRING }
                       }
                     },
-                    desc: { type: 'string' },
-                    status: { type: 'string', enum: ['pending', 'done'] }
+                    desc: { type: Type.STRING },
+                    status: { type: Type.STRING, enum: ['pending', 'done'] }
                   }
                 }
               }
             },
             {
-              type: 'object',
+              type: Type.OBJECT,
               required: ['name', 'patch'],
               properties: {
-                name: { type: 'string', description: 'Exact task name if ID unknown.' },
+                name: { type: Type.STRING, description: 'Exact task name if ID unknown.' },
                 patch: {
-                  type: 'object',
+                  type: Type.OBJECT,
                   properties: {
-                    name: { type: 'string' },
-                    datetime: { type: 'string', description: 'If set, clears date_range.' },
+                    name: { type: Type.STRING },
+                    datetime: { type: Type.STRING, description: 'If set, clears date_range.' },
                     date_range: {
-                      type: 'object',
+                      type: Type.OBJECT,
                       required: ['start', 'end'],
                       properties: {
-                        start: { type: 'string' },
-                        end: { type: 'string' }
+                        start: { type: Type.STRING },
+                        end: { type: Type.STRING }
                       }
                     },
-                    desc: { type: 'string' },
-                    status: { type: 'string', enum: ['pending', 'done'] }
+                    desc: { type: Type.STRING },
+                    status: { type: Type.STRING, enum: ['pending', 'done'] }
                   }
                 }
               }
@@ -94,16 +96,16 @@ export const tools = [
         name: 'remove_task',
         description: 'Remove a task by id or exact name.',
         parameters: {
-          one_of: [
+          oneOf: [
             {
-              type: 'object',
+              type: Type.OBJECT,
               required: ['id'],
-              properties: { id: { type: 'string', description: 'Task ID.' } }
+              properties: { id: { type: Type.STRING, description: 'Task ID.' } }
             },
             {
-              type: 'object',
+              type: Type.OBJECT,
               required: ['name'],
-              properties: { name: { type: 'string', description: 'Exact task name.' } }
+              properties: { name: { type: Type.STRING, description: 'Exact task name.' } }
             }
           ]
         }
@@ -112,12 +114,12 @@ export const tools = [
         name: 'find_tasks',
         description: 'Find tasks by optional filters; returns a textual summary.',
         parameters: {
-          type: 'object',
+          type: Type.OBJECT,
           properties: {
-            name: { type: 'string', description: 'Partial name match (case-insensitive).' },
-            status: { type: 'string', enum: ['pending', 'done'] },
-            before: { type: 'string', description: 'ISO datetime upper bound.' },
-            after: { type: 'string', description: 'ISO datetime lower bound.' }
+            name: { type: Type.STRING, description: 'Partial name match (case-insensitive).' },
+            status: { type: Type.STRING, enum: ['pending', 'done'] },
+            before: { type: Type.STRING, description: 'ISO datetime upper bound.' },
+            after: { type: Type.STRING, description: 'ISO datetime lower bound.' }
           }
         }
       }

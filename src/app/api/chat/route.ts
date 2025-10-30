@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
         // Provide current tasks as context so Gemini can reference them for edit/remove/find.
         const system = `
 You are an AI Task Manager Assistant.
-Your job is to help manage tasks through natural conversation and function calls.
+Your job is to help add/edit/remove/find tasks.
 
 Instructions:
 
@@ -41,10 +41,10 @@ Keep your replies short, natural, and consistent with the tone of a helpful prod
 Goal:
 Ensure that before every function call, all necessary parameters are known and confirmed.
         `.trim();
-        var temp = JSON.stringify({ system, user: message }, null, 2);
-        const contents = [
-          { role: 'user', parts: [{ text: temp }] },
-        ];
+        // var temp = JSON.stringify({ system, user: message }, null, 2);
+        // const contents = [
+        //   { role: 'user', parts: [{ text: temp }] },
+        // ];
         
         const chat = ai.chats.create({
           model: "gemini-2.5-flash",
@@ -57,7 +57,6 @@ Ensure that before every function call, all necessary parameters are known and c
 
         // Call Gemini with tools; function calling returns functionCalls.
         const response = await chat.sendMessage({message})
-
         // Emit assistant text (if any)
         const text = response.text;
         console.log("Generated response: ", text);
@@ -68,7 +67,7 @@ Ensure that before every function call, all necessary parameters are known and c
 
         // Emit function calls (tool calls)
         // SDK returns functionCalls on response; each has name + args
-        const calls = (response as any).function_call ?? {};
+        const calls = (response as any).functionCalls ?? {};
 
         console.log("Function calls: ", calls);
         if(calls) {
