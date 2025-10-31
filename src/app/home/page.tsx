@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, Variants } from 'framer-motion';
 
 type Task = {
   id: string;
@@ -22,7 +22,7 @@ function isoOrUndefined(s?: string) {
 export default function Page() {
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [input, setInput] = React.useState('');
-  const [chat, setChat] = React.useState<{ role: 'user' | 'model'; text: string }[]>([]);
+  const [chat, setChat] = React.useState<{ role: 'user' | 'model'; parts: {text: string}[] }[]>([]);
   const [editing, setEditing] = React.useState<{ id: string; field: keyof Task } | null>(null);
   const [loading, setLoading] = React.useState(false);
   function addTaskLocal(args: any) {
@@ -106,8 +106,12 @@ export default function Page() {
 
     setChat(prev => [
       ...prev,
-      { role: 'model', text: `Found ${filtered.length} task(s).` },
+      { role: 'model', parts:[ {text: `Found ${filtered.length} task(s).`} ]},
     ]);
+  }
+
+  function clearChat() {
+    setChat([]);
   }
 
   async function sendToGemini(msg: string) {
@@ -135,10 +139,11 @@ export default function Page() {
 
         if (payload.type === 'text') {
           console.log("Received text payload: ", payload.text);
-          setChat(prev => [...prev, { role: 'model', text: payload.text }]);
+          setChat(prev => [...prev, { role: 'model', parts: [{text: payload.text }] }]);
         } else if (payload.type === 'toolCall') {
+          console.log("Received ToolCall payload: ", payload.name, payload.args);
           // Dispatch tool call locally (MCP-like behavior)
-          if (payload.name === 'add_task') addTaskLocal(payload.args);
+          if (payload.name === 'add_task') {addTaskLocal(payload.args); clearChat();}
           if (payload.name === 'edit_task') editTaskLocal(payload.args);
           if (payload.name === 'remove_task') removeTaskLocal(payload.args);
           if (payload.name === 'find_tasks') findTasksLocal(payload.args);
@@ -153,7 +158,7 @@ export default function Page() {
   function onSend() {
     const msg = input.trim();
     if (!msg) return;
-    setChat(prev => [...prev, { role: 'user', text: msg }]);
+    setChat(prev => [...prev, { role: 'user', parts: [{text: msg}] }]);
     setInput('');
     sendToGemini(msg);
   }
@@ -172,12 +177,12 @@ export default function Page() {
     );
   }
 
-  const rowVariants = {
+  const rowVariants: Variants = {
     hidden: { opacity: 0, y: 8 },
     visible: (i: number) => ({
       opacity: 1,
       y: 0,
-      transition: { delay: i * 0.03, type: 'spring', stiffness: 300, damping: 25 },
+      transition: { delay: i * 0.03, type: "spring" as const, stiffness: 300, damping: 25 },
     }),
     exit: { opacity: 0, y: -6, transition: { duration: 0.15 } },
   };
@@ -348,7 +353,7 @@ export default function Page() {
                   whiteSpace: 'pre-wrap',
                 }}
               >
-                {m.text}
+                {m.parts[0].text}
               </div>
             ))}
             {loading && (

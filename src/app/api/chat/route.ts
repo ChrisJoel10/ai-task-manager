@@ -30,6 +30,20 @@ Use the chat history to infer as much information as possible about the user's i
 
 If any required information is missing (for example, task name, datetime, date range, etc.), ask concise, context-aware follow-up questions until all required details are gathered.
 
+The manadatory fields for each function are as follows:
+
+- add_task:
+  - name (string): Name of the task.
+  - datetime (string, ISO format) OR date_range (object with start and end in ISO format): When the task is scheduled.
+  - desc (string, optional): Description of the task.
+- edit_task:
+  - id (string) OR name (string): Identifier of the task to edit.
+  - patch (object): Fields to update (name, datetime, date_range, desc).
+- remove_task:
+  - id (string) OR name (string): Identifier of the task to remove.
+- find_tasks:
+  - query (string): Search term to find matching tasks.
+
 Once all mandatory fields are collected from the conversation, make the function call (add_task, edit_task, remove_task, or find_tasks).
 
 For edit or delete (remove) operations, always ask for confirmation if it hasn't been explicitly given yet.
@@ -45,7 +59,7 @@ Ensure that before every function call, all necessary parameters are known and c
         // const contents = [
         //   { role: 'user', parts: [{ text: temp }] },
         // ];
-        
+        console.log("chatHistory: ", chatHistory);
         const chat = ai.chats.create({
           model: "gemini-2.5-flash",
           history: chatHistory,
@@ -67,11 +81,11 @@ Ensure that before every function call, all necessary parameters are known and c
 
         // Emit function calls (tool calls)
         // SDK returns functionCalls on response; each has name + args
-        const calls = (response as any).functionCalls ?? {};
+        const calls = (response as any).functionCalls ?? [];
 
         console.log("Function calls: ", calls);
-        if(calls) {
-          const event: StreamEvent = { type: 'toolCall', name: calls.name, args: calls.arguments ?? {} };
+        for(var call of calls) {
+          const event: StreamEvent = { type: 'toolCall', name: call.name, args: call.args ?? {} };
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
         }
 
