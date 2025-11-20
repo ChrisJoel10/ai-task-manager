@@ -1,7 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
+import { createClient } from '@/utils/supabase/client';
+import { useRouter } from 'next/navigation';
 
 type Task = {
   id: string;
@@ -22,71 +24,156 @@ function isoOrUndefined(s?: string) {
 export default function Page() {
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [input, setInput] = React.useState('');
-  const [chat, setChat] = React.useState<{ role: 'user' | 'model'; parts: {text: string}[] }[]>([]);
+  const [chat, setChat] = React.useState<{ role: 'user' | 'model'; parts: { text: string }[] }[]>([]);
   const [editing, setEditing] = React.useState<{ id: string; field: keyof Task } | null>(null);
   const [loading, setLoading] = React.useState(false);
-  function addTaskLocal(args: any) {
-    const id = crypto.randomUUID();
+  const supabase = createClient();
+  const router = useRouter();
+
+  useEffect(() => {
+    const fetchTasks = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (data) {
+        const mappedTasks: Task[] = data.map((t: any) => ({
+          id: t.id,
+          name: t.name,
+          desc: t.description,
+          dueAt: t.due_at,
+          range: t.range_start && t.range_end ? { start: t.range_start, end: t.range_end } : undefined,
+          status: t.status,
+          createdAt: t.created_at,
+        }));
+        setTasks(mappedTasks);
+      }
+    };
+
+    fetchTasks();
+  }, [router, supabase]);
+
+  async function addTaskLocal(args: any) {
     const name = args.name?.toString().trim();
     const datetime = args.datetime ? isoOrUndefined(args.datetime) : undefined;
     const range = args.date_range?.start && args.date_range?.end
       ? { start: isoOrUndefined(args.date_range.start)!, end: isoOrUndefined(args.date_range.end)! }
       : undefined;
 
-    const t: Task = {
-      id,
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const newTask = {
+      user_id: user.id,
       name: name || 'New task',
-      desc: args.desc ? String(args.desc) : undefined,
-      dueAt: datetime,
-      range,
+      description: args.desc ? String(args.desc) : undefined,
+      due_at: datetime,
+      range_start: range?.start,
+      range_end: range?.end,
       status: 'pending',
-      createdAt: new Date().toISOString(),
     };
-    setTasks(prev => [t, ...prev]);
+
+    const { data, error } = await supabase
+      .from('tasks')
+      .insert([newTask])
+      .select()
+      .single();
+
+    if (data) {
+      const t: Task = {
+        id: data.id,
+        name: data.name,
+        desc: data.description,
+        dueAt: data.due_at,
+        range: data.range_start && data.range_end ? { start: data.range_start, end: data.range_end } : undefined,
+        status: data.status,
+        createdAt: data.created_at,
+      };
+      setTasks(prev => [t, ...prev]);
+    }
   }
 
-  function editTaskLocal(args: any) {
+  async function editTaskLocal(args: any) {
     const byId = args.id ? String(args.id) : undefined;
     const byName = args.name ? String(args.name).toLowerCase() : undefined;
 
-    setTasks(prev =>
-      prev.map(t => {
-        const match =
-          (byId && t.id === byId) ||
-          (byName && t.name.toLowerCase() === byName);
-        if (!match) return t;
-
-        const patch = args.patch || {};
-        const next: Task = { ...t };
-        if (patch.name) next.name = String(patch.name);
-        if (patch.desc !== undefined) next.desc = patch.desc ? String(patch.desc) : undefined;
-        if (patch.status) next.status = patch.status === 'done' ? 'done' : 'pending';
-
-        if (patch.datetime) {
-          next.dueAt = isoOrUndefined(patch.datetime);
-          next.range = undefined;
-        } else if (patch.date_range?.start && patch.date_range?.end) {
-          next.range = {
-            start: isoOrUndefined(patch.date_range.start)!,
-            end: isoOrUndefined(patch.date_range.end)!,
-          };
-          next.dueAt = undefined;
-        }
-        return next;
-      }),
+    const taskToUpdate = tasks.find(t =>
+      (byId && t.id === byId) || (byName && t.name.toLowerCase() === byName)
     );
+
+    if (!taskToUpdate) return;
+
+    const patch = args.patch || {};
+    const updates: any = {};
+
+    if (patch.name) updates.name = String(patch.name);
+    if (patch.desc !== undefined) updates.description = patch.desc ? String(patch.desc) : null;
+    if (patch.status) updates.status = patch.status === 'done' ? 'done' : 'pending';
+
+    if (patch.datetime) {
+      updates.due_at = isoOrUndefined(patch.datetime);
+      updates.range_start = null;
+      updates.range_end = null;
+    } else if (patch.date_range?.start && patch.date_range?.end) {
+      updates.range_start = isoOrUndefined(patch.date_range.start);
+      updates.range_end = isoOrUndefined(patch.date_range.end);
+      updates.due_at = null;
+    }
+
+    const { error } = await supabase
+      .from('tasks')
+      .update(updates)
+      .eq('id', taskToUpdate.id);
+
+    if (!error) {
+      setTasks(prev =>
+        prev.map(t => {
+          if (t.id !== taskToUpdate.id) return t;
+          const next = { ...t, ...patch };
+          if (patch.name) next.name = String(patch.name);
+          if (patch.desc !== undefined) next.desc = patch.desc ? String(patch.desc) : undefined;
+          if (patch.status) next.status = patch.status === 'done' ? 'done' : 'pending';
+          if (patch.datetime) {
+            next.dueAt = isoOrUndefined(patch.datetime);
+            next.range = undefined;
+          } else if (patch.date_range?.start && patch.date_range?.end) {
+            next.range = {
+              start: isoOrUndefined(patch.date_range.start)!,
+              end: isoOrUndefined(patch.date_range.end)!,
+            };
+            next.dueAt = undefined;
+          }
+          return next;
+        })
+      );
+    }
   }
 
-  function removeTaskLocal(args: any) {
+  async function removeTaskLocal(args: any) {
     const byId = args.id ? String(args.id) : undefined;
     const byName = args.name ? String(args.name).toLowerCase() : undefined;
-    setTasks(prev =>
-      prev.filter(t => {
-        if (byId) return t.id !== byId;
-        if (byName) return t.name.toLowerCase() !== byName;
-        return true;
-      }),
+
+    const taskToDelete = tasks.find(t =>
+      (byId && t.id === byId) || (byName && t.name.toLowerCase() === byName)
     );
+
+    if (!taskToDelete) return;
+
+    const { error } = await supabase
+      .from('tasks')
+      .delete()
+      .eq('id', taskToDelete.id);
+
+    if (!error) {
+      setTasks(prev => prev.filter(t => t.id !== taskToDelete.id));
+    }
   }
 
   function findTasksLocal(args: any) {
@@ -106,7 +193,7 @@ export default function Page() {
 
     setChat(prev => [
       ...prev,
-      { role: 'model', parts:[ {text: `Found ${filtered.length} task(s).`} ]},
+      { role: 'model', parts: [{ text: `Found ${filtered.length} task(s).` }] },
     ]);
   }
 
@@ -118,7 +205,7 @@ export default function Page() {
     setLoading(true);
     const res = await fetch('/api/chat', {
       method: 'POST',
-      body: JSON.stringify({ chatHistory: chat, message: msg}),
+      body: JSON.stringify({ chatHistory: chat, message: msg }),
       headers: { 'Content-Type': 'application/json' },
     });
 
@@ -139,11 +226,10 @@ export default function Page() {
 
         if (payload.type === 'text') {
           console.log("Received text payload: ", payload.text);
-          setChat(prev => [...prev, { role: 'model', parts: [{text: payload.text }] }]);
+          setChat(prev => [...prev, { role: 'model', parts: [{ text: payload.text }] }]);
         } else if (payload.type === 'toolCall') {
           console.log("Received ToolCall payload: ", payload.name, payload.args);
-          // Dispatch tool call locally (MCP-like behavior)
-          if (payload.name === 'add_task') {addTaskLocal(payload.args); clearChat();}
+          if (payload.name === 'add_task') { addTaskLocal(payload.args); clearChat(); }
           if (payload.name === 'edit_task') editTaskLocal(payload.args);
           if (payload.name === 'remove_task') removeTaskLocal(payload.args);
           if (payload.name === 'find_tasks') findTasksLocal(payload.args);
@@ -158,23 +244,49 @@ export default function Page() {
   function onSend() {
     const msg = input.trim();
     if (!msg) return;
-    setChat(prev => [...prev, { role: 'user', parts: [{text: msg}] }]);
+    setChat(prev => [...prev, { role: 'user', parts: [{ text: msg }] }]);
     setInput('');
     sendToGemini(msg);
   }
 
-  function updateTask(id: string, patch: Partial<Task>) {
+  async function updateTask(id: string, patch: Partial<Task>) {
     setTasks(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)));
+
+    const updates: any = {};
+    if (patch.name) updates.name = patch.name;
+    if (patch.desc !== undefined) updates.description = patch.desc;
+    if (patch.status) updates.status = patch.status;
+    if (patch.dueAt !== undefined) {
+      updates.due_at = patch.dueAt;
+      if (patch.range === undefined) { // If explicitly undefined, clear range
+        updates.range_start = null;
+        updates.range_end = null;
+      }
+    }
+
+    await supabase.from('tasks').update(updates).eq('id', id);
   }
 
-  function deleteTask(id: string) {
+  async function deleteTask(id: string) {
     setTasks(prev => prev.filter(t => t.id !== id));
+    await supabase.from('tasks').delete().eq('id', id);
   }
 
-  function toggleStatus(id: string) {
+  async function toggleStatus(id: string) {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    const newStatus = task.status === 'done' ? 'pending' : 'done';
+
     setTasks(prev =>
-      prev.map(t => (t.id === id ? { ...t, status: t.status === 'done' ? 'pending' : 'done' } : t)),
+      prev.map(t => (t.id === id ? { ...t, status: newStatus } : t)),
     );
+
+    await supabase.from('tasks').update({ status: newStatus }).eq('id', id);
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.push('/login');
   }
 
   const rowVariants: Variants = {
@@ -191,7 +303,10 @@ export default function Page() {
     <div style={{ height: '100dvh', display: 'flex', background: '#0b0c0f' }}>
       {/* Table pane (3/4) */}
       <div style={{ flex: 3, padding: '16px 20px', overflow: 'auto' }}>
-        <h1 style={{ color: '#eaecef', marginBottom: 12 }}>Tasks</h1>
+        <div className="flex justify-between items-center mb-4">
+          <h1 style={{ color: '#eaecef', marginBottom: 0 }}>Tasks</h1>
+          <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-white">Logout</button>
+        </div>
 
         <div style={{ border: '1px solid #22262c', borderRadius: 10, overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
@@ -285,8 +400,8 @@ export default function Page() {
                             {t.dueAt
                               ? new Date(t.dueAt).toLocaleString()
                               : t.range
-                              ? `${new Date(t.range.start).toLocaleString()} → ${new Date(t.range.end).toLocaleString()}`
-                              : 'No due'}
+                                ? `${new Date(t.range.start).toLocaleString()} → ${new Date(t.range.end).toLocaleString()}`
+                                : 'No due'}
                           </span>
                         </button>
                       )}

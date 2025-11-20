@@ -1,8 +1,7 @@
 import { NextRequest } from 'next/server';
 import { GoogleGenAI } from "@google/genai";
 export const runtime = 'nodejs';
-import { structured_output_config } from './configs/structured_output';
-import { track } from 'framer-motion/client';
+
 import { tools } from './configs/tools';
 
 type StreamEvent =
@@ -18,7 +17,6 @@ export async function POST(req: NextRequest) {
     start: async (controller) => {
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY! });
-
         // Provide current tasks as context so Gemini can reference them for edit/remove/find.
         const system = `
 You are an AI Task Manager Assistant.
@@ -55,10 +53,7 @@ Keep your replies short, natural, and consistent with the tone of a helpful prod
 Goal:
 Ensure that before every function call, all necessary parameters are known and confirmed.
         `.trim();
-        // var temp = JSON.stringify({ system, user: message }, null, 2);
-        // const contents = [
-        //   { role: 'user', parts: [{ text: temp }] },
-        // ];
+
         console.log("chatHistory: ", chatHistory);
         const chat = ai.chats.create({
           model: "gemini-2.5-flash",
