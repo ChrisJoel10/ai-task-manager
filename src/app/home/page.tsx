@@ -27,6 +27,12 @@ export default function Page() {
   const [chat, setChat] = React.useState<{ role: 'user' | 'model'; parts: { text: string }[] }[]>([]);
   const [editing, setEditing] = React.useState<{ id: string; field: keyof Task } | null>(null);
   const [loading, setLoading] = React.useState(false);
+
+  // Pagination & Highlighting State
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(10);
+  const [highlightedTaskId, setHighlightedTaskId] = React.useState<string | null>(null);
+
   const supabase = createClient();
   const router = useRouter();
 
@@ -59,6 +65,19 @@ export default function Page() {
 
     fetchTasks();
   }, [router, supabase]);
+
+  // Auto-navigation to highlighted task
+  useEffect(() => {
+    if (highlightedTaskId) {
+      const index = tasks.findIndex(t => t.id === highlightedTaskId);
+      if (index !== -1) {
+        const page = Math.floor(index / pageSize) + 1;
+        if (page !== currentPage) {
+          setCurrentPage(page);
+        }
+      }
+    }
+  }, [highlightedTaskId, tasks, pageSize, currentPage]);
 
   async function addTaskLocal(args: any) {
     const name = args.name?.toString().trim();
@@ -97,6 +116,7 @@ export default function Page() {
         createdAt: data.created_at,
       };
       setTasks(prev => [t, ...prev]);
+      setHighlightedTaskId(t.id);
     }
   }
 
@@ -153,6 +173,7 @@ export default function Page() {
           return next;
         })
       );
+      setHighlightedTaskId(taskToUpdate.id);
     }
   }
 
@@ -195,6 +216,10 @@ export default function Page() {
       ...prev,
       { role: 'model', parts: [{ text: `Found ${filtered.length} task(s).` }] },
     ]);
+
+    if (filtered.length > 0) {
+      setHighlightedTaskId(filtered[0].id);
+    }
   }
 
   function clearChat() {
@@ -299,150 +324,232 @@ export default function Page() {
     exit: { opacity: 0, y: -6, transition: { duration: 0.15 } },
   };
 
+  const totalPages = Math.ceil(tasks.length / pageSize);
+  const paginatedTasks = tasks.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   return (
     <div style={{ height: '100dvh', display: 'flex', background: '#0b0c0f' }}>
+      <style>{`
+        @property --angle {
+          syntax: '<angle>';
+          initial-value: 0deg;
+          inherits: false;
+        }
+        @keyframes rotate {
+          to { --angle: 360deg; }
+        }
+        .highlight-row {
+          position: relative;
+          z-index: 1;
+        }
+        .highlight-row::before {
+          content: "";
+          position: absolute;
+          inset: -2px;
+          z-index: -1;
+          background: conic-gradient(from var(--angle), transparent 20%, #3b82f6, #8b5cf6, transparent 80%);
+          animation: rotate 3s linear infinite;
+          border-radius: 4px;
+          opacity: 0.7;
+        }
+        /* Fallback for browsers not supporting @property */
+        @supports not (background: paint(something)) {
+           .highlight-row::before {
+             background: linear-gradient(45deg, #3b82f6, #8b5cf6);
+           }
+        }
+      `}</style>
+
       {/* Table pane (3/4) */}
-      <div style={{ flex: 3, padding: '16px 20px', overflow: 'auto' }}>
-        <div className="flex justify-between items-center mb-4">
-          <h1 style={{ color: '#eaecef', marginBottom: 0 }}>Tasks</h1>
-          <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-white">Logout</button>
+      <div style={{ flex: 3, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+        <div style={{ padding: '16px 20px' }}>
+          <div className="flex justify-between items-center">
+            <h1 style={{ color: '#eaecef', marginBottom: 0 }}>Tasks</h1>
+            <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-white">Logout</button>
+          </div>
         </div>
 
-        <div style={{ border: '1px solid #22262c', borderRadius: 10, overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
-            <thead style={{ background: '#12151a' }}>
-              <tr>
-                <th style={th}>Name</th>
-                <th style={th}>Due</th>
-                <th style={th}>Status</th>
-                <th style={thRight}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <AnimatePresence initial={false}>
-                {tasks.map((t, idx) => (
-                  <motion.tr
-                    key={t.id}
-                    layout
-                    custom={idx}
-                    variants={rowVariants}
-                    initial="hidden"
-                    animate="visible"
-                    exit="exit"
-                    style={{
-                      background: idx % 2 === 0 ? '#0e1116' : '#0b0e13',
-                      borderBottom: '1px solid #1a1f27',
-                    }}
-                  >
-                    <td style={td}>
-                      {editing?.id === t.id && editing.field === 'name' ? (
-                        <input
-                          autoFocus
-                          defaultValue={t.name}
-                          onBlur={e => {
-                            updateTask(t.id, { name: e.target.value.trim() || t.name });
-                            setEditing(null);
-                          }}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') {
-                              const target = e.target as HTMLInputElement;
-                              updateTask(t.id, { name: target.value.trim() || t.name });
+        <div style={{ flex: 1, overflow: 'auto', padding: '0 20px' }}>
+          <div style={{ border: '1px solid #22262c', borderRadius: 10, overflow: 'hidden', position: 'relative' }}>
+            <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
+              <thead style={{ background: '#12151a', position: 'sticky', top: 0, zIndex: 10 }}>
+                <tr>
+                  <th style={th}>Name</th>
+                  <th style={th}>Due</th>
+                  <th style={th}>Status</th>
+                  <th style={thRight}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <AnimatePresence initial={false} mode="wait">
+                  {paginatedTasks.map((t, idx) => (
+                    <motion.tr
+                      key={t.id}
+                      layout
+                      custom={idx}
+                      variants={rowVariants}
+                      initial="hidden"
+                      animate="visible"
+                      exit="exit"
+                      className={highlightedTaskId === t.id ? 'highlight-row' : ''}
+                      style={{
+                        background: idx % 2 === 0 ? '#0e1116' : '#0b0e13',
+                        borderBottom: '1px solid #1a1f27',
+                        position: 'relative',
+                      }}
+                    >
+                      <td style={td}>
+                        {editing?.id === t.id && editing.field === 'name' ? (
+                          <input
+                            autoFocus
+                            defaultValue={t.name}
+                            onBlur={e => {
+                              updateTask(t.id, { name: e.target.value.trim() || t.name });
                               setEditing(null);
-                            } else if (e.key === 'Escape') {
-                              setEditing(null);
-                            }
-                          }}
-                          style={inputStyle}
-                        />
-                      ) : (
-                        <button
-                          onClick={() => setEditing({ id: t.id, field: 'name' })}
-                          style={cellButton}
-                          title="Click to edit"
-                        >
-                          <span style={{ color: '#e2e8f0' }}>{t.name}</span>
-                        </button>
-                      )}
-                    </td>
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                const target = e.target as HTMLInputElement;
+                                updateTask(t.id, { name: target.value.trim() || t.name });
+                                setEditing(null);
+                              } else if (e.key === 'Escape') {
+                                setEditing(null);
+                              }
+                            }}
+                            style={inputStyle}
+                          />
+                        ) : (
+                          <button
+                            onClick={() => setEditing({ id: t.id, field: 'name' })}
+                            style={cellButton}
+                            title="Click to edit"
+                          >
+                            <span style={{ color: '#e2e8f0' }}>{t.name}</span>
+                          </button>
+                        )}
+                      </td>
 
-                    <td style={td}>
-                      {editing?.id === t.id && editing.field === 'dueAt' ? (
-                        <input
-                          type="datetime-local"
-                          autoFocus
-                          defaultValue={
-                            t.dueAt ? new Date(t.dueAt).toISOString().slice(0, 16) : ''
-                          }
-                          onBlur={e => {
-                            const val = e.target.value;
-                            updateTask(t.id, { dueAt: val ? new Date(val).toISOString() : undefined, range: undefined });
-                            setEditing(null);
-                          }}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') {
-                              const target = e.target as HTMLInputElement;
-                              const val = target.value;
+                      <td style={td}>
+                        {editing?.id === t.id && editing.field === 'dueAt' ? (
+                          <input
+                            type="datetime-local"
+                            autoFocus
+                            defaultValue={
+                              t.dueAt ? new Date(t.dueAt).toISOString().slice(0, 16) : ''
+                            }
+                            onBlur={e => {
+                              const val = e.target.value;
                               updateTask(t.id, { dueAt: val ? new Date(val).toISOString() : undefined, range: undefined });
                               setEditing(null);
-                            } else if (e.key === 'Escape') {
-                              setEditing(null);
-                            }
-                          }}
-                          style={inputStyle}
-                        />
-                      ) : (
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                const target = e.target as HTMLInputElement;
+                                const val = target.value;
+                                updateTask(t.id, { dueAt: val ? new Date(val).toISOString() : undefined, range: undefined });
+                                setEditing(null);
+                              } else if (e.key === 'Escape') {
+                                setEditing(null);
+                              }
+                            }}
+                            style={inputStyle}
+                          />
+                        ) : (
+                          <button
+                            onClick={() => setEditing({ id: t.id, field: 'dueAt' })}
+                            style={cellButton}
+                            title="Click to edit"
+                          >
+                            <span style={{ color: t.dueAt || t.range ? '#cbd5e1' : '#64748b' }}>
+                              {t.dueAt
+                                ? new Date(t.dueAt).toLocaleString()
+                                : t.range
+                                  ? `${new Date(t.range.start).toLocaleString()} → ${new Date(t.range.end).toLocaleString()}`
+                                  : 'No due'}
+                            </span>
+                          </button>
+                        )}
+                      </td>
+
+                      <td style={td}>
                         <button
-                          onClick={() => setEditing({ id: t.id, field: 'dueAt' })}
-                          style={cellButton}
-                          title="Click to edit"
+                          onClick={() => toggleStatus(t.id)}
+                          style={{
+                            ...pill,
+                            background: t.status === 'done' ? '#14532d' : '#1e293b',
+                            color: t.status === 'done' ? '#86efac' : '#cbd5e1',
+                            borderColor: t.status === 'done' ? '#166534' : '#273244',
+                          }}
                         >
-                          <span style={{ color: t.dueAt || t.range ? '#cbd5e1' : '#64748b' }}>
-                            {t.dueAt
-                              ? new Date(t.dueAt).toLocaleString()
-                              : t.range
-                                ? `${new Date(t.range.start).toLocaleString()} → ${new Date(t.range.end).toLocaleString()}`
-                                : 'No due'}
-                          </span>
+                          {t.status}
                         </button>
-                      )}
-                    </td>
+                      </td>
 
-                    <td style={td}>
-                      <button
-                        onClick={() => toggleStatus(t.id)}
-                        style={{
-                          ...pill,
-                          background: t.status === 'done' ? '#14532d' : '#1e293b',
-                          color: t.status === 'done' ? '#86efac' : '#cbd5e1',
-                          borderColor: t.status === 'done' ? '#166534' : '#273244',
-                        }}
-                      >
-                        {t.status}
-                      </button>
+                      <td style={tdRight}>
+                        <button
+                          onClick={() => deleteTask(t.id)}
+                          style={iconButton}
+                          aria-label="Delete task"
+                          title="Delete"
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </AnimatePresence>
+                {tasks.length === 0 && (
+                  <tr>
+                    <td colSpan={4} style={{ ...td, color: '#64748b', textAlign: 'center', padding: '32px 12px' }}>
+                      No tasks yet. Use the chat to add one.
                     </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-                    <td style={tdRight}>
-                      <button
-                        onClick={() => deleteTask(t.id)}
-                        style={iconButton}
-                        aria-label="Delete task"
-                        title="Delete"
-                      >
-                        ✕
-                      </button>
-                    </td>
-                  </motion.tr>
-                ))}
-              </AnimatePresence>
-              {tasks.length === 0 && (
-                <tr>
-                  <td colSpan={4} style={{ ...td, color: '#64748b', textAlign: 'center', padding: '32px 12px' }}>
-                    No tasks yet. Use the chat to add one.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        {/* Footer with Pagination */}
+        <div style={{ padding: '16px 20px', borderTop: '1px solid #1a1f27', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#9aa4b2' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>Rows per page:</span>
+            <select
+              value={pageSize}
+              onChange={e => {
+                setPageSize(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+              style={{ background: '#0b0e13', border: '1px solid #243041', color: '#e5e7eb', borderRadius: 4, padding: '2px 4px' }}
+            >
+              {[10, 20, 50, 100].map(size => (
+                <option key={size} value={size}>{size}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span>
+              {Math.min((currentPage - 1) * pageSize + 1, tasks.length)}-
+              {Math.min(currentPage * pageSize, tasks.length)} of {tasks.length}
+            </span>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                style={{ ...iconButton, opacity: currentPage === 1 ? 0.5 : 1, cursor: currentPage === 1 ? 'default' : 'pointer' }}
+              >
+                &lt;
+              </button>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages || totalPages === 0}
+                style={{ ...iconButton, opacity: (currentPage === totalPages || totalPages === 0) ? 0.5 : 1, cursor: (currentPage === totalPages || totalPages === 0) ? 'default' : 'pointer' }}
+              >
+                &gt;
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
