@@ -117,6 +117,7 @@ export const tools = [
           type: Type.OBJECT,
           properties: {
             name: { type: Type.STRING, description: 'Partial name match (case-insensitive).' },
+            query: { type: Type.STRING, description: 'Semantic search query.' },
             status: { type: Type.STRING, enum: ['pending', 'done'] },
             before: { type: Type.STRING, description: 'ISO datetime upper bound.' },
             after: { type: Type.STRING, description: 'ISO datetime lower bound.' }

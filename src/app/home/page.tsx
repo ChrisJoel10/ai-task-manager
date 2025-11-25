@@ -24,7 +24,7 @@ function isoOrUndefined(s?: string) {
 export default function Page() {
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [input, setInput] = React.useState('');
-  const [chat, setChat] = React.useState<{ role: 'user' | 'model'; parts: { text: string }[] }[]>([]);
+  const [chat, setChat] = React.useState<{ role: 'user' | 'model'; parts: { text: string }[]; data?: { type: 'searchResults'; ids: string[] } }[]>([]);
   const [editing, setEditing] = React.useState<{ id: string; field: keyof Task } | null>(null);
   const [loading, setLoading] = React.useState(false);
 
@@ -79,6 +79,14 @@ export default function Page() {
     }
   }, [highlightedTaskId, tasks, pageSize, currentPage]);
 
+  // Clear highlight after 5 seconds
+  useEffect(() => {
+    if (highlightedTaskId) {
+      const timer = setTimeout(() => setHighlightedTaskId(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightedTaskId]);
+
   async function addTaskLocal(args: any) {
     const name = args.name?.toString().trim();
     const datetime = args.datetime ? isoOrUndefined(args.datetime) : undefined;
@@ -99,11 +107,13 @@ export default function Page() {
       status: 'pending',
     };
 
-    const { data, error } = await supabase
-      .from('tasks')
-      .insert([newTask])
-      .select()
-      .single();
+    const res = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newTask),
+    });
+
+    const data = await res.json();
 
     if (data) {
       const t: Task = {
@@ -147,12 +157,15 @@ export default function Page() {
       updates.due_at = null;
     }
 
-    const { error } = await supabase
-      .from('tasks')
-      .update(updates)
-      .eq('id', taskToUpdate.id);
+    const res = await fetch('/api/tasks', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: taskToUpdate.id, ...updates }),
+    });
 
-    if (!error) {
+    const data = await res.json();
+
+    if (res.ok) {
       setTasks(prev =>
         prev.map(t => {
           if (t.id !== taskToUpdate.id) return t;
@@ -197,28 +210,54 @@ export default function Page() {
     }
   }
 
-  function findTasksLocal(args: any) {
+  async function findTasksLocal(args: any) {
     const name = args.name ? String(args.name).toLowerCase() : undefined;
+    const query = args.query ? String(args.query) : undefined;
     const status = args.status ? String(args.status) as Task['status'] : undefined;
     const before = args.before ? new Date(args.before) : undefined;
     const after = args.after ? new Date(args.after) : undefined;
 
-    const filtered = tasks.filter(t => {
-      if (name && !t.name.toLowerCase().includes(name)) return false;
-      if (status && t.status !== status) return false;
-      const anchor = t.dueAt ? new Date(t.dueAt) : t.range ? new Date(t.range.start) : undefined;
-      if (before && anchor && anchor > before) return false;
-      if (after && anchor && anchor < after) return false;
-      return true;
-    });
+    let foundIds: string[] = [];
+
+    if (query || name) {
+      // Use semantic search API if query or name is provided
+      // We use 'name' as query if 'query' is not provided, to leverage semantic search for names too
+      const q = query || name;
+      try {
+        const res = await fetch(`/api/tasks?query=${encodeURIComponent(q!)}`);
+        if (res.ok) {
+          const results = await res.json();
+          foundIds = results.map((t: any) => t.id);
+        }
+      } catch (e) {
+        console.error("Search failed", e);
+      }
+    } else {
+      // Fallback to local filtering if no text query
+      foundIds = tasks.filter(t => {
+        if (status && t.status !== status) return false;
+        const anchor = t.dueAt ? new Date(t.dueAt) : t.range ? new Date(t.range.start) : undefined;
+        if (before && anchor && anchor > before) return false;
+        if (after && anchor && anchor < after) return false;
+        return true;
+      }).map(t => t.id);
+    }
 
     setChat(prev => [
       ...prev,
-      { role: 'model', parts: [{ text: `Found ${filtered.length} task(s).` }] },
+      {
+        role: 'model',
+        parts: [{ text: `Found ${foundIds.length} task(s).` }],
+        data: foundIds.length > 1 ? { type: 'searchResults', ids: foundIds } : undefined
+      },
     ]);
 
-    if (filtered.length > 0) {
-      setHighlightedTaskId(filtered[0].id);
+    if (foundIds.length > 0) {
+      // Find the first found ID that exists in our local tasks list
+      const firstMatch = foundIds.find(id => tasks.some(t => t.id === id));
+      if (firstMatch) {
+        setHighlightedTaskId(firstMatch);
+      }
     }
   }
 
@@ -289,7 +328,11 @@ export default function Page() {
       }
     }
 
-    await supabase.from('tasks').update(updates).eq('id', id);
+    await fetch('/api/tasks', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, ...updates }),
+    });
   }
 
   async function deleteTask(id: string) {
@@ -306,7 +349,11 @@ export default function Page() {
       prev.map(t => (t.id === id ? { ...t, status: newStatus } : t)),
     );
 
-    await supabase.from('tasks').update({ status: newStatus }).eq('id', id);
+    await fetch('/api/tasks', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status: newStatus }),
+    });
   }
 
   async function handleLogout() {
@@ -330,33 +377,15 @@ export default function Page() {
   return (
     <div style={{ height: '100dvh', display: 'flex', background: '#0b0c0f' }}>
       <style>{`
-        @property --angle {
-          syntax: '<angle>';
-          initial-value: 0deg;
-          inherits: false;
-        }
-        @keyframes rotate {
-          to { --angle: 360deg; }
+        @keyframes pulse-border {
+          0% { box-shadow: 0 0 0 2px #3b82f6; }
+          50% { box-shadow: 0 0 0 2px #8b5cf6; }
+          100% { box-shadow: 0 0 0 2px #3b82f6; }
         }
         .highlight-row {
-          position: relative;
+          animation: pulse-border 2s infinite;
           z-index: 1;
-        }
-        .highlight-row::before {
-          content: "";
-          position: absolute;
-          inset: -2px;
-          z-index: -1;
-          background: conic-gradient(from var(--angle), transparent 20%, #3b82f6, #8b5cf6, transparent 80%);
-          animation: rotate 3s linear infinite;
-          border-radius: 4px;
-          opacity: 0.7;
-        }
-        /* Fallback for browsers not supporting @property */
-        @supports not (background: paint(something)) {
-           .highlight-row::before {
-             background: linear-gradient(45deg, #3b82f6, #8b5cf6);
-           }
+          position: relative; /* Needed for z-index to work, but hopefully won't break layout if no pseudo-element */
         }
       `}</style>
 
@@ -393,12 +422,10 @@ export default function Page() {
                       exit="exit"
                       className={highlightedTaskId === t.id ? 'highlight-row' : ''}
                       style={{
-                        background: idx % 2 === 0 ? '#0e1116' : '#0b0e13',
                         borderBottom: '1px solid #1a1f27',
-                        position: 'relative',
                       }}
                     >
-                      <td style={td}>
+                      <td style={{ ...td, background: idx % 2 === 0 ? '#0e1116' : '#0b0e13' }}>
                         {editing?.id === t.id && editing.field === 'name' ? (
                           <input
                             autoFocus
@@ -429,7 +456,7 @@ export default function Page() {
                         )}
                       </td>
 
-                      <td style={td}>
+                      <td style={{ ...td, background: idx % 2 === 0 ? '#0e1116' : '#0b0e13' }}>
                         {editing?.id === t.id && editing.field === 'dueAt' ? (
                           <input
                             type="datetime-local"
@@ -460,7 +487,10 @@ export default function Page() {
                             style={cellButton}
                             title="Click to edit"
                           >
-                            <span style={{ color: t.dueAt || t.range ? '#cbd5e1' : '#64748b' }}>
+                            <span
+                              suppressHydrationWarning={true}
+                              style={{ color: t.dueAt || t.range ? '#cbd5e1' : '#64748b' }}
+                            >
                               {t.dueAt
                                 ? new Date(t.dueAt).toLocaleString()
                                 : t.range
@@ -471,7 +501,7 @@ export default function Page() {
                         )}
                       </td>
 
-                      <td style={td}>
+                      <td style={{ ...td, background: idx % 2 === 0 ? '#0e1116' : '#0b0e13' }}>
                         <button
                           onClick={() => toggleStatus(t.id)}
                           style={{
@@ -485,7 +515,7 @@ export default function Page() {
                         </button>
                       </td>
 
-                      <td style={tdRight}>
+                      <td style={{ ...tdRight, background: idx % 2 === 0 ? '#0e1116' : '#0b0e13' }}>
                         <button
                           onClick={() => deleteTask(t.id)}
                           style={iconButton}
@@ -576,6 +606,32 @@ export default function Page() {
                 }}
               >
                 {m.parts[0].text}
+                {m.data?.type === 'searchResults' && m.data.ids.length > 1 && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <button
+                      onClick={() => {
+                        const ids = m.data!.ids;
+                        const currentIdx = ids.indexOf(highlightedTaskId || '');
+                        const nextIdx = currentIdx <= 0 ? ids.length - 1 : currentIdx - 1;
+                        setHighlightedTaskId(ids[nextIdx]);
+                      }}
+                      style={{ ...iconButton, fontSize: 12, padding: '4px 8px' }}
+                    >
+                      Prev
+                    </button>
+                    <button
+                      onClick={() => {
+                        const ids = m.data!.ids;
+                        const currentIdx = ids.indexOf(highlightedTaskId || '');
+                        const nextIdx = currentIdx === -1 || currentIdx === ids.length - 1 ? 0 : currentIdx + 1;
+                        setHighlightedTaskId(ids[nextIdx]);
+                      }}
+                      style={{ ...iconButton, fontSize: 12, padding: '4px 8px' }}
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
             {loading && (
