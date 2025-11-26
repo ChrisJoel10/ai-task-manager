@@ -36,12 +36,24 @@ export default function Page() {
   const supabase = createClient();
   const router = useRouter();
 
+  const [userName, setUserName] = React.useState('');
+
   useEffect(() => {
     const fetchTasks = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.push('/login');
         return;
+      }
+
+      // Set user name from metadata
+      const meta = user.user_metadata;
+      if (meta?.first_name && meta?.last_name) {
+        setUserName(`${meta.first_name} ${meta.last_name}`);
+      } else if (meta?.full_name) {
+        setUserName(meta.full_name);
+      } else {
+        setUserName(user.email || '');
       }
 
       const { data, error } = await supabase
@@ -393,7 +405,10 @@ export default function Page() {
       <div style={{ flex: 3, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
         <div style={{ padding: '16px 20px' }}>
           <div className="flex justify-between items-center">
-            <h1 style={{ color: '#eaecef', marginBottom: 0 }}>Tasks</h1>
+            <div>
+              <h1 style={{ color: '#eaecef', marginBottom: 0 }}>Tasks</h1>
+              {userName && <p style={{ color: '#9aa4b2', fontSize: '0.875rem', marginTop: '4px' }}>Welcome, {userName}</p>}
+            </div>
             <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-white">Logout</button>
           </div>
         </div>
