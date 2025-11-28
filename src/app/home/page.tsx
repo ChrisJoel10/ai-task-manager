@@ -433,9 +433,9 @@ export default function Page() {
     <div className="flex h-screen bg-gray-50 text-gray-900 font-sans">
       <style>{`
         @keyframes pulse-border {
-          0% { box-shadow: 0 0 0 2px #3b82f6; }
-          50% { box-shadow: 0 0 0 2px #8b5cf6; }
-          100% { box-shadow: 0 0 0 2px #3b82f6; }
+          0% { box-shadow: inset 0 0 0 2px #3b82f6; }
+          50% { box-shadow: inset 0 0 0 2px #8b5cf6; }
+          100% { box-shadow: inset 0 0 0 2px #3b82f6; }
         }
         .highlight-row {
           animation: pulse-border 2s infinite;
