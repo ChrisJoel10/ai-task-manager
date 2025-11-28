@@ -701,9 +701,9 @@ export default function Page() {
 
       {/* Chat Sidebar (1/4) */}
       <div className="w-80 border-l border-gray-200 bg-white flex flex-col h-full shadow-lg z-10">
-        <div className="p-4 border-b border-gray-200 bg-gray-50">
-          <h2 className="font-semibold text-gray-800">AI Assistant</h2>
-          <p className="text-xs text-gray-500">Ask me to add, edit, or find tasks.</p>
+        <div className="h-20 px-6 flex flex-col justify-center border-b border-gray-200 bg-gray-50">
+          <h2 className="font-semibold text-gray-800 leading-tight">AI Assistant</h2>
+          <p className="text-xs text-gray-500 mt-0.5">Ask me to add, edit, or find tasks.</p>
         </div>
 
         <div className="flex-1 overflow-auto p-4 bg-gray-50">
