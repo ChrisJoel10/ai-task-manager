@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { createClient } from '@/utils/supabase/client';
 import { useRouter } from 'next/navigation';
@@ -33,10 +33,30 @@ export default function Page() {
   const [pageSize, setPageSize] = React.useState(10);
   const [highlightedTaskId, setHighlightedTaskId] = React.useState<string | null>(null);
 
+  // Filter State
+  const [activeTab, setActiveTab] = React.useState<'All' | 'Pending' | 'Done'>('All');
+
   const supabase = createClient();
   const router = useRouter();
 
   const [userName, setUserName] = React.useState('');
+
+  // Stats
+  const stats = useMemo(() => {
+    const total = tasks.length;
+    const pending = tasks.filter(t => t.status === 'pending').length;
+    const done = tasks.filter(t => t.status === 'done').length;
+    return { total, pending, done };
+  }, [tasks]);
+
+  // Filtered Tasks
+  const filteredTasks = useMemo(() => {
+    if (activeTab === 'Pending') return tasks.filter(t => t.status === 'pending');
+    if (activeTab === 'Done') return tasks.filter(t => t.status === 'done');
+    return tasks;
+  }, [tasks, activeTab]);
+
+  const paginatedTasks = filteredTasks.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   useEffect(() => {
     const fetchTasks = async () => {
@@ -81,15 +101,41 @@ export default function Page() {
   // Auto-navigation to highlighted task
   useEffect(() => {
     if (highlightedTaskId) {
-      const index = tasks.findIndex(t => t.id === highlightedTaskId);
-      if (index !== -1) {
-        const page = Math.floor(index / pageSize) + 1;
-        if (page !== currentPage) {
-          setCurrentPage(page);
+      // 1. Check if task is in current filter
+      const isInFilter = filteredTasks.some(t => t.id === highlightedTaskId);
+
+      if (isInFilter) {
+        const index = filteredTasks.findIndex(t => t.id === highlightedTaskId);
+        if (index !== -1) {
+          const page = Math.floor(index / pageSize) + 1;
+          if (page !== currentPage) {
+            setCurrentPage(page);
+          }
+        }
+      } else {
+        // 2. If not in current filter, switch tab
+        const task = tasks.find(t => t.id === highlightedTaskId);
+        if (task) {
+          if (task.status === 'pending' && activeTab !== 'Pending') setActiveTab('Pending');
+          else if (task.status === 'done' && activeTab !== 'Done') setActiveTab('Done');
+          else if (activeTab !== 'All') setActiveTab('All');
         }
       }
     }
-  }, [highlightedTaskId, tasks, pageSize, currentPage]);
+  }, [highlightedTaskId, filteredTasks, pageSize, currentPage, activeTab, tasks]);
+
+  // Scroll to highlighted task
+  useEffect(() => {
+    if (highlightedTaskId) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById(`task-row-${highlightedTaskId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightedTaskId, currentPage, activeTab]);
 
   // Clear highlight after 5 seconds
   useEffect(() => {
@@ -301,16 +347,12 @@ export default function Page() {
           | { type: 'done' };
 
         if (payload.type === 'text') {
-          console.log("Received text payload: ", payload.text);
           setChat(prev => [...prev, { role: 'model', parts: [{ text: payload.text }] }]);
         } else if (payload.type === 'toolCall') {
-          console.log("Received ToolCall payload: ", payload.name, payload.args);
           if (payload.name === 'add_task') { addTaskLocal(payload.args); clearChat(); }
           if (payload.name === 'edit_task') editTaskLocal(payload.args);
           if (payload.name === 'remove_task') removeTaskLocal(payload.args);
           if (payload.name === 'find_tasks') findTasksLocal(payload.args);
-        } else if (payload.type === 'done') {
-          // no-op
         }
       }
     }
@@ -334,7 +376,7 @@ export default function Page() {
     if (patch.status) updates.status = patch.status;
     if (patch.dueAt !== undefined) {
       updates.due_at = patch.dueAt;
-      if (patch.range === undefined) { // If explicitly undefined, clear range
+      if (patch.range === undefined) {
         updates.range_start = null;
         updates.range_end = null;
       }
@@ -383,11 +425,12 @@ export default function Page() {
     exit: { opacity: 0, y: -6, transition: { duration: 0.15 } },
   };
 
-  const totalPages = Math.ceil(tasks.length / pageSize);
-  const paginatedTasks = tasks.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+
+  const totalPages = Math.ceil(filteredTasks.length / pageSize);
 
   return (
-    <div style={{ height: '100dvh', display: 'flex', background: '#0b0c0f' }}>
+    <div className="flex h-screen bg-gray-50 text-gray-900 font-sans">
       <style>{`
         @keyframes pulse-border {
           0% { box-shadow: 0 0 0 2px #3b82f6; }
@@ -397,37 +440,102 @@ export default function Page() {
         .highlight-row {
           animation: pulse-border 2s infinite;
           z-index: 1;
-          position: relative; /* Needed for z-index to work, but hopefully won't break layout if no pseudo-element */
+          position: relative;
         }
       `}</style>
 
-      {/* Table pane (3/4) */}
-      <div style={{ flex: 3, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-        <div style={{ padding: '16px 20px' }}>
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 style={{ color: '#eaecef', marginBottom: 0 }}>Tasks</h1>
-              {userName && <p style={{ color: '#9aa4b2', fontSize: '0.875rem', marginTop: '4px' }}>Welcome, {userName}</p>}
-            </div>
-            <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-white">Logout</button>
+      {/* Main Content (3/4) */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden">
+        {/* Header */}
+        <div className="px-8 py-6 flex justify-between items-center bg-white border-b border-gray-200">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold text-gray-900">Tasks</h1>
+          </div>
+          <div className="flex items-center gap-4">
+            {userName && (
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-semibold text-sm">
+                  {userName.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-sm font-medium text-gray-700">{userName}</span>
+              </div>
+            )}
+            <button onClick={handleLogout} className="text-sm text-gray-500 hover:text-gray-900">Logout</button>
           </div>
         </div>
 
-        <div style={{ flex: 1, overflow: 'auto', padding: '0 20px' }}>
-          <div style={{ border: '1px solid #22262c', borderRadius: 10, overflow: 'hidden', position: 'relative' }}>
-            <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
-              <thead style={{ background: '#12151a', position: 'sticky', top: 0, zIndex: 10 }}>
+        <div className="flex-1 overflow-auto p-8">
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-2 h-2 rounded-full bg-purple-500"></div>
+                <span className="text-sm font-medium text-gray-500">Total Tasks</span>
+              </div>
+              <div className="text-3xl font-bold text-gray-900">{stats.total}</div>
+            </div>
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-2 h-2 rounded-full bg-orange-500"></div>
+                <span className="text-sm font-medium text-gray-500">Pending Tasks</span>
+              </div>
+              <div className="text-3xl font-bold text-gray-900">{stats.pending}</div>
+            </div>
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                <span className="text-sm font-medium text-gray-500">Completed Tasks</span>
+              </div>
+              <div className="text-3xl font-bold text-gray-900">{stats.done}</div>
+            </div>
+          </div>
+
+          {/* Tabs & Actions */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+            <div className="flex gap-6 border-b border-gray-200 w-full sm:w-auto">
+              {['All', 'Pending', 'Done'].map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab as any)}
+                  className={`pb-2 text-sm font-medium transition-colors relative ${activeTab === tab ? 'text-blue-600' : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                >
+                  {tab}
+                  {activeTab === tab && (
+                    <motion.div
+                      layoutId="activeTab"
+                      className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => document.getElementById('chat-input')?.focus()}
+                className="bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+              >
+                + Add Task
+              </button>
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-500 font-semibold">
                 <tr>
-                  <th style={th}>Name</th>
-                  <th style={th}>Due</th>
-                  <th style={th}>Status</th>
-                  <th style={thRight}>Actions</th>
+                  <th className="px-6 py-4">Task Name</th>
+                  <th className="px-6 py-4">Due Date</th>
+                  <th className="px-6 py-4">Status</th>
+                  <th className="px-6 py-4 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-gray-100">
                 <AnimatePresence initial={false} mode="wait">
                   {paginatedTasks.map((t, idx) => (
                     <motion.tr
+                      id={`task-row-${t.id}`}
                       key={t.id}
                       layout
                       custom={idx}
@@ -435,12 +543,9 @@ export default function Page() {
                       initial="hidden"
                       animate="visible"
                       exit="exit"
-                      className={highlightedTaskId === t.id ? 'highlight-row' : ''}
-                      style={{
-                        borderBottom: '1px solid #1a1f27',
-                      }}
+                      className={`hover:bg-gray-50 transition-colors ${highlightedTaskId === t.id ? 'highlight-row bg-blue-50' : ''}`}
                     >
-                      <td style={{ ...td, background: idx % 2 === 0 ? '#0e1116' : '#0b0e13' }}>
+                      <td className="px-6 py-4">
                         {editing?.id === t.id && editing.field === 'name' ? (
                           <input
                             autoFocus
@@ -451,34 +556,33 @@ export default function Page() {
                             }}
                             onKeyDown={e => {
                               if (e.key === 'Enter') {
-                                const target = e.target as HTMLInputElement;
-                                updateTask(t.id, { name: target.value.trim() || t.name });
+                                updateTask(t.id, { name: (e.target as HTMLInputElement).value.trim() || t.name });
                                 setEditing(null);
-                              } else if (e.key === 'Escape') {
-                                setEditing(null);
-                              }
+                              } else if (e.key === 'Escape') setEditing(null);
                             }}
-                            style={inputStyle}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         ) : (
-                          <button
-                            onClick={() => setEditing({ id: t.id, field: 'name' })}
-                            style={cellButton}
-                            title="Click to edit"
-                          >
-                            <span style={{ color: '#e2e8f0' }}>{t.name}</span>
-                          </button>
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 text-xs font-bold">
+                              {t.name.charAt(0).toUpperCase()}
+                            </div>
+                            <button
+                              onClick={() => setEditing({ id: t.id, field: 'name' })}
+                              className="font-medium text-gray-900 hover:text-blue-600 text-sm text-left"
+                            >
+                              {t.name}
+                            </button>
+                          </div>
                         )}
                       </td>
 
-                      <td style={{ ...td, background: idx % 2 === 0 ? '#0e1116' : '#0b0e13' }}>
+                      <td className="px-6 py-4">
                         {editing?.id === t.id && editing.field === 'dueAt' ? (
                           <input
                             type="datetime-local"
                             autoFocus
-                            defaultValue={
-                              t.dueAt ? new Date(t.dueAt).toISOString().slice(0, 16) : ''
-                            }
+                            defaultValue={t.dueAt ? new Date(t.dueAt).toISOString().slice(0, 16) : ''}
                             onBlur={e => {
                               const val = e.target.value;
                               updateTask(t.id, { dueAt: val ? new Date(val).toISOString() : undefined, range: undefined });
@@ -486,143 +590,135 @@ export default function Page() {
                             }}
                             onKeyDown={e => {
                               if (e.key === 'Enter') {
-                                const target = e.target as HTMLInputElement;
-                                const val = target.value;
+                                const val = (e.target as HTMLInputElement).value;
                                 updateTask(t.id, { dueAt: val ? new Date(val).toISOString() : undefined, range: undefined });
                                 setEditing(null);
-                              } else if (e.key === 'Escape') {
-                                setEditing(null);
-                              }
+                              } else if (e.key === 'Escape') setEditing(null);
                             }}
-                            style={inputStyle}
+                            className="px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         ) : (
                           <button
                             onClick={() => setEditing({ id: t.id, field: 'dueAt' })}
-                            style={cellButton}
-                            title="Click to edit"
+                            className="text-sm text-gray-500 hover:text-blue-600"
                           >
-                            <span
-                              suppressHydrationWarning={true}
-                              style={{ color: t.dueAt || t.range ? '#cbd5e1' : '#64748b' }}
-                            >
-                              {t.dueAt
-                                ? new Date(t.dueAt).toLocaleString()
-                                : t.range
-                                  ? `${new Date(t.range.start).toLocaleString()} → ${new Date(t.range.end).toLocaleString()}`
-                                  : 'No due'}
-                            </span>
+                            {t.dueAt
+                              ? new Date(t.dueAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+                              : t.range
+                                ? `${new Date(t.range.start).toLocaleDateString()} - ${new Date(t.range.end).toLocaleDateString()}`
+                                : 'No due date'}
                           </button>
                         )}
                       </td>
 
-                      <td style={{ ...td, background: idx % 2 === 0 ? '#0e1116' : '#0b0e13' }}>
+                      <td className="px-6 py-4">
                         <button
                           onClick={() => toggleStatus(t.id)}
-                          style={{
-                            ...pill,
-                            background: t.status === 'done' ? '#14532d' : '#1e293b',
-                            color: t.status === 'done' ? '#86efac' : '#cbd5e1',
-                            borderColor: t.status === 'done' ? '#166534' : '#273244',
-                          }}
+                          className={`px-3 py-1 rounded-full text-xs font-medium border ${t.status === 'done'
+                            ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
+                            : 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100'
+                            }`}
                         >
-                          {t.status}
+                          {t.status === 'done' ? 'Completed' : 'Pending'}
                         </button>
                       </td>
 
-                      <td style={{ ...tdRight, background: idx % 2 === 0 ? '#0e1116' : '#0b0e13' }}>
-                        <button
-                          onClick={() => deleteTask(t.id)}
-                          style={iconButton}
-                          aria-label="Delete task"
-                          title="Delete"
-                        >
-                          ✕
-                        </button>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => deleteTask(t.id)}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            title="Delete"
+                          >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M3 6h18"></path>
+                              <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                              <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                            </svg>
+                          </button>
+                        </div>
                       </td>
                     </motion.tr>
                   ))}
                 </AnimatePresence>
-                {tasks.length === 0 && (
+                {filteredTasks.length === 0 && (
                   <tr>
-                    <td colSpan={4} style={{ ...td, color: '#64748b', textAlign: 'center', padding: '32px 12px' }}>
-                      No tasks yet. Use the chat to add one.
+                    <td colSpan={4} className="px-6 py-12 text-center text-gray-400 text-sm">
+                      No tasks found.
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
-        </div>
 
-        {/* Footer with Pagination */}
-        <div style={{ padding: '16px 20px', borderTop: '1px solid #1a1f27', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#9aa4b2' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>Rows per page:</span>
-            <select
-              value={pageSize}
-              onChange={e => {
-                setPageSize(Number(e.target.value));
-                setCurrentPage(1);
-              }}
-              style={{ background: '#0b0e13', border: '1px solid #243041', color: '#e5e7eb', borderRadius: 4, padding: '2px 4px' }}
-            >
-              {[10, 20, 50, 100].map(size => (
-                <option key={size} value={size}>{size}</option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span>
-              {Math.min((currentPage - 1) * pageSize + 1, tasks.length)}-
-              {Math.min(currentPage * pageSize, tasks.length)} of {tasks.length}
-            </span>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <button
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                style={{ ...iconButton, opacity: currentPage === 1 ? 0.5 : 1, cursor: currentPage === 1 ? 'default' : 'pointer' }}
-              >
-                &lt;
-              </button>
-              <button
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages || totalPages === 0}
-                style={{ ...iconButton, opacity: (currentPage === totalPages || totalPages === 0) ? 0.5 : 1, cursor: (currentPage === totalPages || totalPages === 0) ? 'default' : 'pointer' }}
-              >
-                &gt;
-              </button>
+            {/* Pagination */}
+            <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
+              <div className="text-sm text-gray-500">
+                Showing <span className="font-medium">{Math.min((currentPage - 1) * pageSize + 1, filteredTasks.length)}</span> to <span className="font-medium">{Math.min(currentPage * pageSize, filteredTasks.length)}</span> of <span className="font-medium">{filteredTasks.length}</span> entries
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1 border border-gray-300 rounded bg-white text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <div className="flex gap-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    // Simple pagination logic for display
+                    let p = i + 1;
+                    if (totalPages > 5 && currentPage > 3) {
+                      p = currentPage - 2 + i;
+                    }
+                    if (p > totalPages) return null;
+                    return (
+                      <button
+                        key={p}
+                        onClick={() => setCurrentPage(p)}
+                        className={`w-8 h-8 flex items-center justify-center rounded text-sm ${currentPage === p
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'
+                          }`}
+                      >
+                        {p}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages || totalPages === 0}
+                  className="px-3 py-1 border border-gray-300 rounded bg-white text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Chat pane (1/4) */}
-      <div style={{ flex: 1, borderLeft: '1px solid #1a1f27', display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div style={{ padding: 16, borderBottom: '1px solid #1a1f27' }}>
-          <h2 style={{ color: '#eaecef' }}>Chat</h2>
+      {/* Chat Sidebar (1/4) */}
+      <div className="w-80 border-l border-gray-200 bg-white flex flex-col h-full shadow-lg z-10">
+        <div className="p-4 border-b border-gray-200 bg-gray-50">
+          <h2 className="font-semibold text-gray-800">AI Assistant</h2>
+          <p className="text-xs text-gray-500">Ask me to add, edit, or find tasks.</p>
         </div>
 
-        <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="flex-1 overflow-auto p-4 bg-gray-50">
+          <div className="flex flex-col gap-4">
             {chat.map((m, i) => (
               <div
                 key={i}
-                style={{
-                  alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-                  background: m.role === 'user' ? '#1f2937' : '#0f172a',
-                  color: '#e5e7eb',
-                  border: '1px solid #263042',
-                  padding: '8px 10px',
-                  borderRadius: 10,
-                  maxWidth: '80%',
-                  whiteSpace: 'pre-wrap',
-                }}
+                className={`p-3 rounded-lg text-sm max-w-[90%] ${m.role === 'user'
+                  ? 'self-end bg-blue-600 text-white'
+                  : 'self-start bg-white border border-gray-200 text-gray-700 shadow-sm'
+                  }`}
               >
                 {m.parts[0].text}
                 {m.data?.type === 'searchResults' && m.data.ids.length > 1 && (
-                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  <div className="flex gap-2 mt-2">
                     <button
                       onClick={() => {
                         const ids = m.data!.ids;
@@ -630,7 +726,7 @@ export default function Page() {
                         const nextIdx = currentIdx <= 0 ? ids.length - 1 : currentIdx - 1;
                         setHighlightedTaskId(ids[nextIdx]);
                       }}
-                      style={{ ...iconButton, fontSize: 12, padding: '4px 8px' }}
+                      className="text-xs bg-black/10 hover:bg-black/20 px-2 py-1 rounded"
                     >
                       Prev
                     </button>
@@ -641,7 +737,7 @@ export default function Page() {
                         const nextIdx = currentIdx === -1 || currentIdx === ids.length - 1 ? 0 : currentIdx + 1;
                         setHighlightedTaskId(ids[nextIdx]);
                       }}
-                      style={{ ...iconButton, fontSize: 12, padding: '4px 8px' }}
+                      className="text-xs bg-black/10 hover:bg-black/20 px-2 py-1 rounded"
                     >
                       Next
                     </button>
@@ -650,75 +746,41 @@ export default function Page() {
               </div>
             ))}
             {loading && (
-              <div
-                style={{
-                  alignSelf: 'flex-start',
-                  background: '#0f172a',
-                  color: '#94a3b8',
-                  border: '1px solid #263042',
-                  padding: '8px 10px',
-                  borderRadius: 10,
-                  maxWidth: '80%',
-                }}
-              >
-                Thinking…
+              <div className="self-start bg-gray-100 text-gray-500 px-3 py-2 rounded-lg text-sm animate-pulse">
+                Thinking...
               </div>
             )}
           </div>
         </div>
 
-        <div style={{ padding: 12, borderTop: '1px solid #1a1f27', display: 'flex', gap: 8 }}>
-          <input
-            placeholder='e.g., "Remind me to get groceries tomorrow at 12"'
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                onSend();
-              }
-            }}
-            style={{
-              flex: 1,
-              padding: '10px 12px',
-              borderRadius: 8,
-              border: '1px solid #243041',
-              background: '#0b0e13',
-              color: '#e5e7eb',
-              outline: 'none',
-            }}
-          />
-          <button
-            onClick={onSend}
-            disabled={loading}
-            style={{
-              padding: '10px 14px',
-              borderRadius: 8,
-              background: loading ? '#334155' : '#1d4ed8',
-              color: 'white',
-              border: '1px solid #1e3a8a',
-              cursor: loading ? 'not-allowed' : 'pointer',
-            }}
-          >
-            Send
-          </button>
+        <div className="p-4 border-t border-gray-200 bg-white">
+          <div className="flex gap-2">
+            <input
+              id="chat-input"
+              placeholder="Type a command..."
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  onSend();
+                }
+              }}
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50 text-gray-900"
+            />
+            <button
+              onClick={onSend}
+              disabled={loading}
+              className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
-
-const th: React.CSSProperties = {
-  textAlign: 'left',
-  padding: '10px 12px',
-  color: '#9aa4b2',
-  fontWeight: 600,
-  borderBottom: '1px solid #1a1f27',
-};
-const thRight: React.CSSProperties = { ...th, textAlign: 'right' };
-const td: React.CSSProperties = { padding: '10px 12px', color: '#d1d5db', verticalAlign: 'middle' };
-const tdRight: React.CSSProperties = { ...td, textAlign: 'right' };
-const cellButton: React.CSSProperties = { background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', width: '100%' };
-const inputStyle: React.CSSProperties = { width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #243041', background: '#0b0e13', color: '#e5e7eb', outline: 'none' };
-const iconButton: React.CSSProperties = { background: '#111827', color: '#e5e7eb', border: '1px solid #243041', borderRadius: 6, padding: '6px 8px', cursor: 'pointer' };
-const pill: React.CSSProperties = { border: '1px solid', borderRadius: 999, padding: '4px 10px', fontSize: 12 };
