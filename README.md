@@ -1,6 +1,12 @@
 ## Live Demo
 👉 **Live App:** [https://ai-task-manager-mu.vercel.app/login](https://ai-task-manager-mu.vercel.app/login)
 ---
+## Screenshots
+<img width="1904" height="882" alt="image" src="https://github.com/user-attachments/assets/98b7d7d1-8c2f-4e65-9e16-6f76856de11b" />
+<img width="1906" height="880" alt="image" src="https://github.com/user-attachments/assets/7af7d4d7-4179-4e3f-993d-80402e3d06f4" />
+<img width="1910" height="880" alt="image" src="https://github.com/user-attachments/assets/4998cea6-d898-4b9d-8fcb-86f539f3b4dd" />
+<img width="1886" height="922" alt="image" src="https://github.com/user-attachments/assets/ce9d94ad-7fec-4920-b1d2-119bf34fa178" />
+
 
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
